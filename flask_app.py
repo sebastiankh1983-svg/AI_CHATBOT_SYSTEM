@@ -31,7 +31,24 @@ load_dotenv()
 
 # Flask App erstellen
 app = Flask(__name__)
-CORS(app)  # Enable CORS für Frontend
+
+# CORS konfigurieren für Firebase Frontend
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["*"],  # Erlaubt alle Origins (Firebase, localhost, etc.)
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
+    }
+})
+
+# CORS Headers für alle Responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
 
 # Konfiguration
 API_KEY = os.getenv('GOOGLE_API_KEY')
@@ -197,6 +214,27 @@ PERSONAS = {
 
 # ============================================================================
 # API ENDPOINTS
+# ============================================================================
+
+@app.route('/', methods=['GET'])
+def root():
+    """Root Endpoint - Zeigt verfügbare API Endpoints"""
+    return jsonify({
+        'status': 'online',
+        'message': 'AI Chatbot API ist online!',
+        'version': '1.0',
+        'endpoints': {
+            'health': '/api/health',
+            'personas': '/api/personas',
+            'chat_start': '/api/chat/start (POST)',
+            'chat_send': '/api/chat/send (POST)',
+            'chat_history': '/api/chat/history (GET)',
+            'chat_save': '/api/chat/save (POST)',
+            'conversations': '/api/conversations (GET)',
+            'conversation_detail': '/api/conversations/<id> (GET)'
+        },
+        'documentation': 'https://github.com/sebastiankh1983-svg/AI_CHATBOT_SYSTEM'
+    })
 # ============================================================================
 
 @app.route('/api/health', methods=['GET'])
