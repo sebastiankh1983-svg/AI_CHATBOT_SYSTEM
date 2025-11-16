@@ -59,6 +59,7 @@ active_chat = None
 current_persona = None
 current_session_name = None
 
+
 # ============================================================================
 # DATABASE FUNCTIONS (von chatbot.py übernommen)
 # ============================================================================
@@ -210,6 +211,25 @@ PERSONAS = {
         'top_k': 50
     }
 }
+
+
+# ============================================================================
+# INITIALISIERUNG (wird beim Import/Start ausgeführt)
+# ============================================================================
+
+# API Key überprüfen und konfigurieren
+if API_KEY:
+    genai.configure(api_key=API_KEY)
+    print("✅ Gemini API konfiguriert")
+else:
+    print("⚠️  WARNUNG: GOOGLE_API_KEY nicht gefunden!")
+
+# Datenbank erstellen (beim Start)
+try:
+    create_database()
+    print("✅ Datenbank initialisiert")
+except Exception as e:
+    print(f"⚠️  Datenbank-Fehler: {e}")
 
 
 # ============================================================================
@@ -491,21 +511,10 @@ def internal_error(error):
 # ============================================================================
 
 if __name__ == '__main__':
-    # API Key überprüfen
-    if not API_KEY:
-        print("❌ FEHLER: API_KEY nicht in .env gefunden!")
-        exit(1)
-
-    # Gemini API konfigurieren
-    genai.configure(api_key=API_KEY)
-
-    # Datenbank erstellen
-    create_database()
-    print("✅ Datenbank initialisiert")
-
-    # Flask App starten
+    # Flask App starten (nur für lokales Development)
     print("🚀 Flask API startet auf http://localhost:5000")
     print("📝 Endpoints:")
+    print("   GET  /")
     print("   GET  /api/health")
     print("   GET  /api/personas")
     print("   POST /api/chat/start")
