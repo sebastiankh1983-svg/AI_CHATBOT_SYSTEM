@@ -1,0 +1,136 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    🚀 GIT PUSH - SCHNELLANLEITUNG                        ║
+║                    PyCharm Terminal - Copy & Paste                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+📍 Repository: https://github.com/sebastiankh1983-svg/AI_CHATBOT_SYSTEM.git
+
+───────────────────────────────────────────────────────────────────────────
+
+🟢 ERSTES MAL (Initial Setup):
+
+git init
+git add .
+git commit -m "Initial commit: AI Chatbot mit Gemini API"
+git remote add origin https://github.com/sebastiankh1983-svg/AI_CHATBOT_SYSTEM.git
+git branch -M main
+git push -u origin main
+
+───────────────────────────────────────────────────────────────────────────
+
+🔄 WEITERE ÄNDERUNGEN:
+
+git add .
+git commit -m "Beschreibung deiner Änderung"
+git push
+
+───────────────────────────────────────────────────────────────────────────
+
+🔒 SICHERHEITSCHECK:
+
+git status
+# → .env sollte NICHT in der Liste sein!
+
+git ls-files | find ".env"
+# → Nur .env.example sollte erscheinen
+
+───────────────────────────────────────────────────────────────────────────
+
+❌ FALLS .env VERSEHENTLICH COMMITTED:
+
+git rm --cached .env
+git commit -m "Remove .env from git"
+git push
+
+DANN: API Key auf https://ai.google.dev/ SOFORT ändern!
+
+───────────────────────────────────────────────────────────────────────────
+
+✅ WAS WIRD HOCHGELADEN:
+
+✓ chatbot.py
+✓ flask_app.py
+✓ requirements.txt
+✓ .gitignore
+✓ .env.example (Template OHNE echten Key)
+✓ Alle .md Dateien
+
+❌ WAS NICHT HOCHGELADEN WIRD:
+
+✗ .env (API Key - bleibt lokal!)
+✗ .venv/ (Virtual Environment)
+✗ __pycache__/ (Python Cache)
+✗ *.db (Datenbank)
+✗ .idea/ (PyCharm Settings)
+
+───────────────────────────────────────────────────────────────────────────
+
+📝 GUTE COMMIT MESSAGES:
+
+git commit -m "feat: Neue Feature XYZ"
+git commit -m "fix: Bug ABC behoben"
+git commit -m "docs: README aktualisiert"
+git commit -m "style: CSS verbessert"
+git commit -m "refactor: Code aufgeräumt"
+
+───────────────────────────────────────────────────────────────────────────
+
+🎯 NACH DEM PUSH:
+
+Öffne: https://github.com/sebastiankh1983-svg/AI_CHATBOT_SYSTEM
+
+Überprüfe:
+☑ Alle Dateien sind da
+☑ .env ist NICHT sichtbar (nur .env.example)
+☑ README.md wird angezeigt
+
+───────────────────────────────────────────────────────────────────────────
+
+🆘 HILFE BEI PROBLEMEN:
+
+Problem: "Permission denied"
+Lösung: GitHub Personal Access Token erstellen
+        Settings → Developer settings → Personal access tokens
+
+Problem: "Repository not found"
+Lösung: URL überprüfen (copy-paste von GitHub)
+
+Problem: ".env auf GitHub sichtbar"
+Lösung: SOFORT git rm --cached .env
+        API Key auf Google SOFORT ändern
+
+───────────────────────────────────────────────────────────────────────────
+
+💡 WORKFLOW FÜR TÄGLICHE ARBEIT:
+
+1. Code ändern
+2. git add .
+3. git commit -m "Was hast du gemacht"
+4. git push
+5. Auf GitHub überprüfen
+
+───────────────────────────────────────────────────────────────────────────
+
+🔐 NIEMALS HOCHLADEN:
+
+⛔ API Keys
+⛔ Passwörter
+⛔ Datenbanken mit echten Daten
+⛔ .env Datei
+⛔ Credentials jeglicher Art
+
+───────────────────────────────────────────────────────────────────────────
+
+✅ CHECKLIST VOR PUSH:
+
+□ git status überprüft
+□ .env ist in ignored files
+□ Commit message ist aussagekräftig
+□ Keine Secrets im Code
+□ .gitignore ist aktuell
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  ✅ DEIN CODE IST JETZT SICHER AUF GITHUB!                                ║
+║  🔒 DEIN API KEY BLEIBT LOKAL!                                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
