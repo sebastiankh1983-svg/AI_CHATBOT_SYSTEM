@@ -13,6 +13,7 @@ import google.generativeai as genai
 from datetime import datetime
 import sqlite3
 import logging
+import uuid
 
 # .env laden
 load_dotenv()
@@ -25,6 +26,8 @@ DB_NAME = 'chatbot_conversations.db'
 active_chat = None
 current_persona = None
 current_session_name = None
+# Multi-Session Speicher
+sessions = {}  # session_id -> {'chat': chat_obj, 'persona': persona_key, 'session_name': str}
 
 
 # ============================================================================
@@ -281,30 +284,33 @@ def create_app():
 
         return jsonify({'personas': personas_list})
 
+    @app.route('/api/capabilities', methods=['GET'])
+    def capabilities():
+        # Multi-Session jetzt aktiv
+        return jsonify({
+            'chat': True,
+            'personas': True,
+            'persistence': True,
+            'multi_session': True,
+            'gemini': bool(API_KEY),
+            'version': '1.1'
+        })
+
     @app.route('/api/chat/start', methods=['POST'])
     def start_chat():
-        """Startet einen neuen Chat (optional conversation_id ignoriert)"""
-        global active_chat, current_persona, current_session_name
-
+        global active_chat, current_persona, current_session_name, sessions
         try:
             if not API_KEY:
                 return error_response('API Key nicht konfiguriert', 500, code='MISSING_API_KEY')
             data = request.json or {}
             persona_key = data.get('persona_key')
             session_name = data.get('session_name')
-            _client_conversation_id = data.get('conversation_id')  # aktuell nicht genutzt
-
             if persona_key not in PERSONAS:
                 return error_response('Ungültige Persona', 400, code='INVALID_PERSONA')
             if not session_name:
                 return error_response('Session Name erforderlich', 400, code='MISSING_SESSION_NAME')
-
             persona = PERSONAS[persona_key]
-            current_persona = persona_key
-            current_session_name = session_name
-
-            temperature = persona.get('temperature', persona.get('temp'))
-
+            temperature = persona.get('temperature')
             model = genai.GenerativeModel(
                 'gemini-2.0-flash',
                 system_instruction=persona['instruction'],
@@ -315,74 +321,77 @@ def create_app():
                     'max_output_tokens': 500
                 }
             )
-
-            active_chat = model.start_chat(history=[])
-            logging.info("Chat gestartet Persona=%s Session=%s", persona['name'], session_name)
-
+            chat_obj = model.start_chat(history=[])
+            session_id = str(uuid.uuid4())
+            sessions[session_id] = {
+                'chat': chat_obj,
+                'persona': persona_key,
+                'session_name': session_name
+            }
+            active_chat = chat_obj
+            current_persona = persona_key
+            current_session_name = session_name
+            logging.info(f"Chat gestartet (session_id={session_id}) Persona={persona['name']} SessionName={session_name}")
             return jsonify({
                 'status': 'success',
                 'message': f'Chat gestartet mit {persona["name"]}',
                 'persona': persona['name'],
                 'session_name': session_name,
-                'conversation_id': _client_conversation_id  # Echo zurück (falls Frontend sendet)
+                'session_id': session_id,
+                'conversation_id': session_id  # hinzugefügt
             })
-
         except Exception as e:
             logging.error("Fehler beim Starten des Chats: %s", e)
             return error_response(str(e), 500, code='START_EXCEPTION')
 
     @app.route('/api/chat/send', methods=['POST'])
     def send_message():
-        """Sendet eine Nachricht"""
-        global active_chat
-
+        global sessions, active_chat
         try:
-            if not active_chat:
-                return error_response('Kein Chat aktiv – zuerst /api/chat/start aufrufen', 400, code='NO_ACTIVE_CHAT')
-
             data = request.json or {}
             message = data.get('message')
+            session_id = data.get('session_id')
             if not message:
                 return error_response('Nachricht erforderlich', 400, code='MISSING_MESSAGE')
-
-            response = active_chat.send_message(message)
+            chat_ref = None
+            if session_id:
+                sess = sessions.get(session_id)
+                if not sess:
+                    return error_response('Unbekannte session_id', 404, code='UNKNOWN_SESSION')
+                chat_ref = sess['chat']
+            else:
+                chat_ref = active_chat
+            if not chat_ref:
+                return error_response('Kein aktiver Chat – zuerst /api/chat/start aufrufen', 400, code='NO_ACTIVE_CHAT')
+            response = chat_ref.send_message(message)
             candidate = response.candidates[0]
-            finish_reason = candidate.finish_reason
-
-            if finish_reason == 1:  # STOP
-                return jsonify({'status': 'success', 'message': response.text, 'finish_reason': 'STOP'})
-            elif finish_reason == 2:  # MAX_TOKENS
+            fr = candidate.finish_reason
+            if fr == 1:
+                return jsonify({'status': 'success', 'message': response.text, 'finish_reason': 'STOP', 'session_id': session_id, 'conversation_id': session_id})
+            elif fr == 2:
                 text = candidate.content.parts[0].text if candidate.content.parts else ""
-                return jsonify({'status': 'success', 'message': text, 'finish_reason': 'MAX_TOKENS', 'warning': 'Antwort gekürzt'})
-            elif finish_reason == 3:  # SAFETY
+                return jsonify({'status': 'success', 'message': text, 'finish_reason': 'MAX_TOKENS', 'warning': 'Antwort gekürzt', 'session_id': session_id, 'conversation_id': session_id})
+            elif fr == 3:
                 return error_response('Antwort blockiert (Safety)', 403, code='SAFETY_BLOCK')
-            elif finish_reason == 4:  # RECITATION
+            elif fr == 4:
                 return error_response('Antwort blockiert (Recitation)', 403, code='RECITATION_BLOCK')
             else:
-                return error_response(f'Unbekannte finish_reason={finish_reason}', 500, code='UNKNOWN_FINISH_REASON')
-
+                return error_response(f'Unbekannte finish_reason={fr}', 500, code='UNKNOWN_FINISH_REASON')
         except Exception as e:
             logging.error("Fehler beim Senden: %s", e)
             return error_response(str(e), 500, code='SEND_EXCEPTION')
 
     @app.route('/api/chat/history', methods=['GET'])
     def get_chat_history():
-        """Gibt Chat-History zurück"""
+        """Gibt Chat-History zurück (alias: messages)"""
         global active_chat
-
         try:
             if not active_chat:
-                return jsonify({'history': []})
-
+                return jsonify({'history': [], 'messages': []})
             history = []
             for message in active_chat.history:
-                history.append({
-                    'role': message.role,
-                    'content': message.parts[0].text
-                })
-
-            return jsonify({'history': history})
-
+                history.append({'role': message.role, 'content': message.parts[0].text})
+            return jsonify({'history': history, 'messages': history})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -455,14 +464,31 @@ def create_app():
             logging.error("Fehler beim Laden der Conversation %s: %s", conversation_id, e)
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/chat/session/<session_id>/history', methods=['GET'])
+    def session_history(session_id):
+        sess = sessions.get(session_id)
+        if not sess:
+            return error_response('Unbekannte session_id', 404, code='UNKNOWN_SESSION')
+        history_list = []
+        for m in sess['chat'].history:
+            history_list.append({'role': m.role, 'content': m.parts[0].text})
+        return jsonify({
+            'session_id': session_id,
+            'history': history_list,
+            'messages': history_list,
+            'persona': PERSONAS[sess['persona']]['name'],
+            'session_name': sess['session_name']
+        })
+
     @app.route('/api/debug-session', methods=['GET'])
     def debug_session():
-        """Debug Endpoint für Session-Status"""
         return jsonify({
             'active': active_chat is not None,
             'current_persona': current_persona,
             'current_session_name': current_session_name,
-            'history_length': len(active_chat.history) if active_chat else 0
+            'history_length': len(active_chat.history) if active_chat else 0,
+            'sessions_count': len(sessions),
+            'session_ids': list(sessions.keys())[:10]
         })
 
     @app.route('/api/diagnostic', methods=['GET'])
@@ -479,66 +505,74 @@ def create_app():
 
     @app.route('/api/chat', methods=['POST', 'OPTIONS'])
     def chat_router():
-        """Unified Chat Endpoint (Fallback für Frontend das fälschlich /api/chat nutzt)
-        POST Body Varianten:
-        - Start: {"persona_key":"1","session_name":"XYZ"}
-        - Send:  {"message":"Hallo"}
-        """
-        global active_chat, current_persona, current_session_name
-        if request.method == 'OPTIONS':  # Preflight handled by flask-cors, aber explizit OK
+        global sessions, active_chat, current_persona, current_session_name
+        if request.method == 'OPTIONS':
             return ('', 204)
         data = request.json or {}
-        # Start Chat
-        if 'persona_key' in data and 'session_name' in data:
-            if not API_KEY:
-                return error_response('API Key nicht konfiguriert', 500, code='MISSING_API_KEY')
-            persona_key = data.get('persona_key')
-            session_name = data.get('session_name')
+        persona_key = data.get('persona_key')
+        session_name = data.get('session_name')
+        incoming_message = data.get('message')
+        session_id = data.get('session_id')
+        if persona_key and session_name and incoming_message:
             if persona_key not in PERSONAS:
                 return error_response('Ungültige Persona', 400, code='INVALID_PERSONA')
-            if not session_name:
-                return error_response('Session Name erforderlich', 400, code='MISSING_SESSION_NAME')
-            persona = PERSONAS[persona_key]
-            current_persona = persona_key
-            current_session_name = session_name
-            temperature = persona.get('temperature', persona.get('temp'))
+            if not API_KEY:
+                return error_response('API Key nicht konfiguriert', 500, code='MISSING_API_KEY')
+            temperature = PERSONAS[persona_key]['temperature']
             try:
                 model = genai.GenerativeModel(
                     'gemini-2.0-flash',
-                    system_instruction=persona['instruction'],
+                    system_instruction=PERSONAS[persona_key]['instruction'],
                     generation_config={
                         'temperature': temperature,
-                        'top_p': persona['top_p'],
-                        'top_k': persona['top_k'],
+                        'top_p': PERSONAS[persona_key]['top_p'],
+                        'top_k': PERSONAS[persona_key]['top_k'],
                         'max_output_tokens': 500
                     }
                 )
-                active_chat = model.start_chat(history=[])
-                return jsonify({
-                    'status': 'success',
-                    'mode': 'start',
-                    'message': f'Chat gestartet mit {persona["name"]}',
-                    'persona': persona['name'],
-                    'session_name': session_name
-                })
-            except Exception as e:
-                return error_response(str(e), 500, code='START_EXCEPTION')
-        # Send Message
-        if 'message' in data and 'persona_key' not in data:
-            if not active_chat:
-                return error_response('Kein aktiver Chat – zuerst Start ausführen', 400, code='NO_ACTIVE_CHAT')
-            message = data.get('message')
-            if not message:
-                return error_response('Nachricht erforderlich', 400, code='MISSING_MESSAGE')
-            try:
-                response = active_chat.send_message(message)
+                chat_obj = model.start_chat(history=[])
+                new_session_id = str(uuid.uuid4())
+                sessions[new_session_id] = {'chat': chat_obj, 'persona': persona_key, 'session_name': session_name}
+                active_chat = chat_obj
+                current_persona = persona_key
+                current_session_name = session_name
+                response = chat_obj.send_message(incoming_message)
                 candidate = response.candidates[0]
                 fr = candidate.finish_reason
                 if fr == 1:
-                    return jsonify({'status': 'success', 'mode': 'send', 'message': response.text, 'finish_reason': 'STOP'})
+                    return jsonify({'status': 'success', 'mode': 'start+send', 'message': response.text, 'session_id': new_session_id, 'conversation_id': new_session_id})
                 elif fr == 2:
                     txt = candidate.content.parts[0].text if candidate.content.parts else ''
-                    return jsonify({'status': 'success', 'mode': 'send', 'message': txt, 'finish_reason': 'MAX_TOKENS', 'warning': 'Antwort gekürzt'})
+                    return jsonify({'status': 'success', 'mode': 'start+send', 'message': txt, 'warning': 'Antwort gekürzt', 'finish_reason': 'MAX_TOKENS', 'session_id': new_session_id, 'conversation_id': new_session_id})
+                elif fr == 3:
+                    return error_response('Antwort blockiert (Safety)', 403, code='SAFETY_BLOCK')
+                elif fr == 4:
+                    return error_response('Antwort blockiert (Recitation)', 403, code='RECITATION_BLOCK')
+                else:
+                    return error_response(f'Unbekannte finish_reason={fr}', 500, code='UNKNOWN_FINISH_REASON')
+            except Exception as e:
+                return error_response(str(e), 500, code='START_SEND_EXCEPTION')
+        if persona_key and session_name and not incoming_message:
+            start_resp = start_chat()
+            return start_resp
+        if incoming_message and (session_id or (not persona_key and not session_name)):
+            if session_id:
+                if session_id not in sessions:
+                    return error_response('Unbekannte session_id', 404, code='UNKNOWN_SESSION')
+                chat_obj = sessions[session_id]['chat']
+            else:
+                chat_obj = active_chat
+            if not chat_obj:
+                return error_response('Kein aktiver Chat', 400, code='NO_ACTIVE_CHAT')
+            try:
+                response = chat_obj.send_message(incoming_message)
+                candidate = response.candidates[0]
+                fr = candidate.finish_reason
+                if fr == 1:
+                    return jsonify({'status': 'success', 'mode': 'send', 'message': response.text, 'session_id': session_id, 'conversation_id': session_id})
+                elif fr == 2:
+                    txt = candidate.content.parts[0].text if candidate.content.parts else ''
+                    return jsonify({'status': 'success', 'mode': 'send', 'message': txt, 'finish_reason': 'MAX_TOKENS', 'warning': 'Antwort gekürzt', 'session_id': session_id, 'conversation_id': session_id})
                 elif fr == 3:
                     return error_response('Antwort blockiert (Safety)', 403, code='SAFETY_BLOCK')
                 elif fr == 4:
@@ -547,7 +581,6 @@ def create_app():
                     return error_response(f'Unbekannte finish_reason={fr}', 500, code='UNKNOWN_FINISH_REASON')
             except Exception as e:
                 return error_response(str(e), 500, code='SEND_EXCEPTION')
-        # Ungültiger Body
         return error_response('Ungültiger Request Body für /api/chat', 400, code='INVALID_CHAT_BODY')
 
     @app.errorhandler(404)
