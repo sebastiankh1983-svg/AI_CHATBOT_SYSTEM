@@ -190,16 +190,16 @@ def create_app():
         "http://127.0.0.1:3000"
     ]
     # Wenn FLASK_ENV=development gesetzt ist → alle Origins erlauben (lokales Debugging)
-    if os.getenv("FLASK_ENV") == "development":
-        allowed_origins = "*"
+    #if os.getenv("FLASK_ENV") == "development":
+        #allowed_origins = "*"
 
     CORS(
         app,
-        resources={r"/api/*": {
+        resources={r"/api*": {
             "origins": allowed_origins,
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type"],
+            "supports_credentials": False,
             "max_age": 3600  # Preflight-Ergebnis für 1h cachen
         }}
     )
@@ -296,8 +296,65 @@ def create_app():
             'version': '1.1'
         })
 
+    # ============================================================================
+    # RATE LIMITING (einfach, In-Memory)
+    # ============================================================================
+
+    # Max. Anzahl Requests pro IP und Endpoint pro Zeitfenster
+    RATE_LIMIT_WINDOW_SECONDS = 60  # 1 Minute
+    RATE_LIMIT_MAX_START = 5        # max. 5 /api/chat/start Aufrufe pro Minute
+    RATE_LIMIT_MAX_SEND = 20        # max. 20 /api/chat/send Aufrufe pro Minute
+
+    rate_limit_store = {
+        'start': {},  # ip -> [timestamps]
+        'send': {},   # ip -> [timestamps]
+    }
+
+
+    def _clean_old_timestamps(timestamps, window_seconds):
+        """Entfernt Timestamps, die außerhalb des Zeitfensters liegen."""
+        now = datetime.now().timestamp()
+        return [ts for ts in timestamps if now - ts <= window_seconds]
+
+
+    def check_rate_limit(kind: str, ip: str) -> bool:
+        """Prüft und aktualisiert das Rate-Limit.
+
+        kind: 'start' oder 'send'
+        ip:   IP-Adresse des Clients
+
+        Rückgabe: True = erlaubt, False = Limit überschritten
+        """
+        if kind not in rate_limit_store:
+            return True
+
+        now = datetime.now().timestamp()
+        timestamps = rate_limit_store[kind].get(ip, [])
+        timestamps = _clean_old_timestamps(timestamps, RATE_LIMIT_WINDOW_SECONDS)
+
+        if kind == 'start':
+            limit = RATE_LIMIT_MAX_START
+        else:
+            limit = RATE_LIMIT_MAX_SEND
+
+        if len(timestamps) >= limit:
+            return False
+
+        timestamps.append(now)
+        rate_limit_store[kind][ip] = timestamps
+        return True
+
+
     @app.route('/api/chat/start', methods=['POST'])
-    def start_chat():
+    def api_chat_start():
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if not check_rate_limit('start', client_ip):
+            return jsonify({
+                'status': 'error',
+                'error': 'rate_limited',
+                'message': 'Zu viele Start-Anfragen. Bitte warte einen Moment und versuche es erneut.'
+            }), 429
+
         global active_chat, current_persona, current_session_name, sessions
         try:
             if not API_KEY:
@@ -345,7 +402,15 @@ def create_app():
             return error_response(str(e), 500, code='START_EXCEPTION')
 
     @app.route('/api/chat/send', methods=['POST'])
-    def send_message():
+    def api_chat_send():
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if not check_rate_limit('send', client_ip):
+            return jsonify({
+                'status': 'error',
+                'error': 'rate_limited',
+                'message': 'Zu viele Nachrichten in kurzer Zeit. Bitte etwas langsamer senden.'
+            }), 429
+
         global sessions, active_chat
         try:
             data = request.json or {}

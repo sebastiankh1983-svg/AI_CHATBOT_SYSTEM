@@ -20,7 +20,7 @@ import os
 # CONFIGURATION
 # ============================================================================
 
-API_KEY = 'AIzaSyAuk7ZGR9IVeRLOrnss3MzcV-H8bPpQdhk'
+API_KEY = os.getenv('GOOGLE_API_KEY', '')  # API-Key wird jetzt aus Umgebungsvariable gelesen
 DB_NAME = 'chatbot_conversations.db'
 
 # ============================================================================
