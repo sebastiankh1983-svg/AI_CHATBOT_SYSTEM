@@ -22,12 +22,13 @@ ALLOWED_ORIGINS = [
 app = Flask(__name__)
 
 # ✅ OPTIMIERTE CORS-KONFIGURATION
+# WICHTIG: supports_credentials muss False sein, wenn withCredentials im Frontend nicht genutzt wird
 CORS(app, resources={
     r"/api/*": {
         "origins": ALLOWED_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True,
+        "supports_credentials": False,  # ❗ Auf False gesetzt
         "max_age": 3600
     }
 })

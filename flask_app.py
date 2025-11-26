@@ -199,7 +199,7 @@ def create_app():
             "origins": allowed_origins,
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type"],
-            "supports_credentials": True,
+            "supports_credentials": False,  # ❗ Auf False gesetzt (Frontend sendet keine Credentials)
             "max_age": 3600  # Preflight-Ergebnis für 1h cachen
         }}
     )
