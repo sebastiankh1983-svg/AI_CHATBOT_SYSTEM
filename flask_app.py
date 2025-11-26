@@ -3,6 +3,7 @@
 ===============================================================
 
 Production-ready Flask API mit Application Factory Pattern.
+Version: 1.2 - CORS Fix (supports_credentials=False)
 """
 
 from flask import Flask, request, jsonify
